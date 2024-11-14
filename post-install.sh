@@ -3,39 +3,39 @@
 set -e
 
 DEB_URLS=(
-  https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-  https://azuredatastudio-update.azurewebsites.net/latest/linux-deb-x64/stable
-  https://code.visualstudio.com/sha/download?build=stable\&os=linux-deb-x64
+  "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+  "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64"
+  "https://azuredatastudio-update.azurewebsites.net/latest/linux-deb-x64/stable"
 )
 
 APT_LIST=(
+  build-essential
   flatpak
   gnome-software-plugin-flatpak
   winff
   gparted
   gufw
   synaptic
-  vlc
-  gnome-sushi
   git
   wget
   ubuntu-restricted-extras
   flameshot
   libunwind8
+  libffi-dev
+  libyaml-dev
+  libgmp-dev
+  freetds-dev
+  ca-certificates
+  curl
 )
 
 FLATPAK_LIST=(
   org.gimp.GIMP
-  com.bitwarden.desktop
   org.telegram.desktop
   org.onlyoffice.desktopeditors
   org.qbittorrent.qBittorrent
   com.anydesk.Anydesk
   org.remmina.Remmina
-  io.bassi.Amberol
-  io.github.Soundux
-  io.gitlab.news_flash.NewsFlash
-  org.audacityteam.Audacity
   org.inkscape.Inkscape
   org.kde.kdenlive
   rest.insomnia.Insomnia
@@ -43,7 +43,6 @@ FLATPAK_LIST=(
 
 # working directory
 DOWNLOADS_PATH="/tmp/postinstall_debs"
-FILE_BOOKMARK="$HOME/.config/gtk-3.0/bookmarks"
 
 print_message() {
   local message_type=$1
@@ -79,8 +78,8 @@ check_internet() {
 }
 
 remove_apt_lock() {
-  sudo rm /var/lib/dpkg/lock-frontend
-  sudo rm /var/cache/apt/archives/lock
+  sudo rm -f /var/lib/dpkg/lock-frontend
+  sudo rm -f /var/cache/apt/archives/lock
 }
 
 add_archi386() {
@@ -125,8 +124,8 @@ install_debs() {
       print_message "info" "$package_name is already installed."
     fi
   done
-
 }
+
 install_flatpaks() {
   print_message "info" "Adding Flathub repository..."
   flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -148,22 +147,83 @@ system_clean() {
   flatpak update -y
   sudo apt autoclean -y
   sudo apt autoremove -y
-  nautilus -q
 }
 
 extra_config() {
-  mkdir $HOME/backups
-  mkdir $HOME/dev
+}
 
-  # Add Nautilus bookmarks
-  if test -f "$FILE_BOOKMARK"; then
-    print_message "info" "$FILE_BOOKMARK already exists, adding bookmarks..."
-  else
-    print_message "info" "Creating $FILE_BOOKMARK..."
-    touch $HOME/.config/gkt-3.0/bookmarks
+install_asdf() {
+  print_message "info" "Installing asdf..."
+
+  # get last asdf version from github
+  asdf_version=$(curl -s https://api.github.com/repos/asdf-vm/asdf/releases/latest | grep tag_name | cut -d '"' -f 4)
+  git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch $asdf_version
+
+  # install asdf plugins
+  . "$HOME/.asdf/asdf.sh"
+
+  print_message "info" "Installing asdf plugins..."
+  asdf plugin add ruby https://github.com/asdf-vm/asdf-ruby.git
+  asdf plugin add nodejs https://github.com/asdf-vm/asdf-nodejs.git
+
+  echo "legacy_version_file = yes" >~/.asdfrc
+}
+
+configure_zsh() {
+  git clone https://github.com/zsh-users/zsh-autosuggestions.git $ZSH_CUSTOM/plugins/zsh-autosuggestions
+
+  # replace 'plugins=(git)' with 'plugins=(git zsh-autosuggestions)'
+  sed -i 's/plugins=(git)/plugins=(git asdf zsh-autosuggestions)/' ~/.zshrc
+}
+
+install_docker() {
+  print_message "info" "Installing Docker..."
+
+  # Add Docker's official GPG key:
+  sudo apt update
+  sudo install -m 0755 -d /etc/apt/keyrings
+  sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+  . /etc/os-release
+  UBUNTU_FAMILY=$VERSION_CODENAME
+
+  # if not Ubuntu, use UBUNTU_CODENAME variable
+  if [ -z "$UBUNTU_FAMILY" ]; then
+    UBUNTU_FAMILY=$UBUNTU_CODENAME
   fi
 
-  echo "file://$HOME/backups 🔵 Backups" >>$FILE_BOOKMARK
+  # Add the repository to Apt sources:
+  echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+    $UBUNTU_FAMILY stable" |
+    sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+
+  sudo apt update
+  sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  sudo groupadd docker
+  sudo usermod -aG docker $USER
+  newgrp docker
+}
+
+install_aws_cli() {
+  print_message "info" "Installing AWS CLI..."
+
+  sudo apt install awscli -y
+}
+
+install_sql_tools() {
+  print_message "info" "Installing SQL Server tools..."
+
+  curl https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc
+  curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+
+  sudo apt update
+  sudo apt install mssql-tools18 unixodbc-dev
+
+  echo 'export PATH="$PATH:/opt/mssql-tools18/bin"' >>~/.zshrc
+  source ~/.zshrc
 }
 
 main() {
@@ -174,11 +234,16 @@ main() {
   add_archi386
   just_apt_update
   install_debs
-  install_debs_from_url
   install_flatpaks
+  install_debs_from_url
   extra_config
   apt_update
   system_clean
+  install_asdf
+  configure_zsh
+  install_docker
+  install_aws_cli
+  install_sql_tools
 
   print_message "info" "Post-installation completed."
 }
