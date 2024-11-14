@@ -170,10 +170,14 @@ install_asdf() {
 }
 
 configure_zsh() {
+  print_message "info" "Configuring Zsh..."
   git clone https://github.com/zsh-users/zsh-autosuggestions.git $ZSH_CUSTOM/plugins/zsh-autosuggestions
 
-  # replace 'plugins=(git)' with 'plugins=(git zsh-autosuggestions)'
-  sed -i 's/plugins=(git)/plugins=(git asdf zsh-autosuggestions)/' ~/.zshrc
+  # configure plugins
+  sed -i 's/plugins=(git)/plugins=(git asdf zsh-autosuggestions docker)/' ~/.zshrc
+
+  # configure theme
+  sed -i 's/ZSH_THEME="robbyrussell"/# ZSH_THEME="robbyrussell\nZSH_THEME="agnoster"/' ~/.zshrc
 }
 
 install_docker() {
